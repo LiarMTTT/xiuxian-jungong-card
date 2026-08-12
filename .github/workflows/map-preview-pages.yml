@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/map-preview-pages.yml'
+      - 'map-preview/index.html'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout clean frontend
+        uses: actions/checkout@v4
+
       - name: Configure Pages
         uses: actions/configure-pages@v5
         with:
@@ -47,7 +51,6 @@ jobs:
           }
 
           for path in \
-            preview/index.html \
             preview/app.js \
             preview/styles.css \
             preview/vendor/leaflet.css \
@@ -67,6 +70,8 @@ jobs:
           do
             fetch_asset "$path"
           done
+
+          install -m 0644 map-preview/index.html _site/preview/index.html
 
           for season in spring summer autumn winter
           do
@@ -102,23 +107,38 @@ jobs:
           } | xargs -n 4 -P 16 bash -c 'download_tile "$@"' _
 
           touch _site/.nojekyll
+          printf '%s\n' 'xiuxian-pages-ok cf-clean-1' > _site/health.txt
           cat > _site/index.html <<'HTML'
           <!doctype html>
           <html lang="zh-CN">
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width,initial-scale=1">
-              <meta http-equiv="refresh" content="0;url=./preview/index.html">
-              <title>九域山河 · 世界地图</title>
+              <title>九域山河 · 8K 世界地图</title>
+              <style>
+                *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#07110f;color:#e8e2d3;font-family:system-ui,sans-serif}
+                main{max-width:680px;margin:auto;padding:42px 20px}.seal{color:#d2b47d;letter-spacing:.18em;font-size:13px}
+                h1{margin:8px 0 10px;font-size:30px}.copy{color:#9eaca5;line-height:1.7}
+                a{display:block;margin-top:24px;padding:15px 18px;border:1px solid #6d977f;border-radius:10px;background:#295f4e;color:#fff;text-align:center;text-decoration:none;font-weight:700}
+                small{display:block;margin-top:14px;color:#70827a;line-height:1.6}
+              </style>
             </head>
             <body>
-              <a href="./preview/index.html">打开九域山河世界地图</a>
+              <main>
+                <div class="seal">GITHUB PAGES · MOBILE ENTRY</div>
+                <h1>九域山河</h1>
+                <p class="copy">四季联动、LOD 瓦片与完整 8K 整图均已保留。此入口不加载外部资源，点击后进入互动地图。</p>
+                <a href="./preview/index.html?v=cf-clean-1">进入完整 8K 互动地图</a>
+                <small>若能看到本页，说明 GitHub Pages 的 HTML 链路正常。</small>
+              </main>
             </body>
           </html>
           HTML
 
           test "$(find _site/dist/tiles -type f -name '*.webp' | wc -l)" -eq 964
+          test "$(wc -c < _site/preview/index.html)" -eq 11464
           jq empty _site/dist/data/map-data.json
+          ! grep -E '__CF[$]cv|/cdn-cgi/challenge-platform' _site/preview/index.html
           ! grep -E '龙曦|无名沉渊|dragonCanon|east-sea-nameless-deep' _site/dist/data/map-data.json
 
       - name: Upload site
