@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/map-preview-pages.yml'
-      - 'map-preview/index.html'
+      - 'map-preview/**'
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,6 @@ jobs:
           }
 
           for path in \
-            preview/app.js \
             preview/styles.css \
             preview/vendor/leaflet.css \
             preview/vendor/leaflet.js \
@@ -71,13 +70,43 @@ jobs:
             fetch_asset "$path"
           done
 
-          install -m 0644 map-preview/index.html _site/preview/index.html
+          install -m 0644 map-preview/app.js _site/preview/app.js
 
           for season in spring summer autumn winter
           do
             fetch_asset "dist/previews/map-${season}-terrain-8192x5461-preview-1024.webp"
             fetch_asset "dist/seasons/map-${season}-terrain-8192x5461.webp"
           done
+
+          python3 - <<'PY'
+          from base64 import b64encode
+          from pathlib import Path
+
+          source = Path("map-preview/index.html").read_text(encoding="utf-8")
+          image = b64encode(
+              Path("_site/dist/previews/map-spring-terrain-8192x5461-preview-1024.webp").read_bytes()
+          ).decode("ascii")
+          fallback = """
+              <style id="instant-map-fallback">
+                .map-placeholder {
+                  background:
+                    linear-gradient(rgba(4, 13, 11, .18), rgba(4, 13, 11, .38)),
+                    url("data:image/webp;base64,__SPRING_PREVIEW__") center / contain no-repeat #07110f !important;
+                }
+                .placeholder-content {
+                  padding: 12px 16px;
+                  border: 1px solid rgba(210, 180, 125, .16);
+                  border-radius: 10px;
+                  background: rgba(5, 15, 12, .72);
+                  backdrop-filter: blur(8px);
+                }
+              </style>
+          """.replace("__SPRING_PREVIEW__", image)
+          preview = source.replace("  </head>", f"{fallback}\n  </head>", 1)
+          root = preview.replace("  <head>", '  <head>\n    <base href="./preview/" />', 1)
+          Path("_site/preview/index.html").write_text(preview, encoding="utf-8")
+          Path("_site/index.html").write_text(root, encoding="utf-8")
+          PY
 
           download_tile() {
             local season="$1"
@@ -107,38 +136,15 @@ jobs:
           } | xargs -n 4 -P 16 bash -c 'download_tile "$@"' _
 
           touch _site/.nojekyll
-          printf '%s\n' 'xiuxian-pages-ok cf-clean-1' > _site/health.txt
-          cat > _site/index.html <<'HTML'
-          <!doctype html>
-          <html lang="zh-CN">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width,initial-scale=1">
-              <title>九域山河 · 8K 世界地图</title>
-              <style>
-                *{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#07110f;color:#e8e2d3;font-family:system-ui,sans-serif}
-                main{max-width:680px;margin:auto;padding:42px 20px}.seal{color:#d2b47d;letter-spacing:.18em;font-size:13px}
-                h1{margin:8px 0 10px;font-size:30px}.copy{color:#9eaca5;line-height:1.7}
-                a{display:block;margin-top:24px;padding:15px 18px;border:1px solid #6d977f;border-radius:10px;background:#295f4e;color:#fff;text-align:center;text-decoration:none;font-weight:700}
-                small{display:block;margin-top:14px;color:#70827a;line-height:1.6}
-              </style>
-            </head>
-            <body>
-              <main>
-                <div class="seal">GITHUB PAGES · MOBILE ENTRY</div>
-                <h1>九域山河</h1>
-                <p class="copy">四季联动、LOD 瓦片与完整 8K 整图均已保留。此入口不加载外部资源，点击后进入互动地图。</p>
-                <a href="./preview/index.html?v=cf-clean-1">进入完整 8K 互动地图</a>
-                <small>若能看到本页，说明 GitHub Pages 的 HTML 链路正常。</small>
-              </main>
-            </body>
-          </html>
-          HTML
-
+          printf '%s\n' 'xiuxian-pages-ok direct-map-2' > _site/health.txt
           test "$(find _site/dist/tiles -type f -name '*.webp' | wc -l)" -eq 964
-          test "$(wc -c < _site/preview/index.html)" -eq 11464
+          node --check _site/preview/app.js
+          test "$(wc -c < _site/preview/index.html)" -gt 150000
+          test "$(wc -c < _site/index.html)" -gt 150000
+          grep -Fq '<base href="./preview/" />' _site/index.html
+          grep -Fq 'data:image/webp;base64,' _site/preview/index.html
           jq empty _site/dist/data/map-data.json
-          ! grep -E '__CF[$]cv|/cdn-cgi/challenge-platform' _site/preview/index.html
+          ! grep -E '__CF[$]cv|/cdn-cgi/challenge-platform' _site/index.html _site/preview/index.html
           ! grep -E '龙曦|无名沉渊|dragonCanon|east-sea-nameless-deep' _site/dist/data/map-data.json
 
       - name: Upload site
