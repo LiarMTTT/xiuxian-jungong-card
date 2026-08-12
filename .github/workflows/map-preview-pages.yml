@@ -1,0 +1,131 @@
+name: Deploy map preview
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/map-preview-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Build player map site
+        shell: bash
+        env:
+          SOURCE_BASE: https://xiuxian-map-preview.alsdmttt.chatgpt.site
+        run: |
+          set -euo pipefail
+
+          mkdir -p _site/preview/vendor
+          mkdir -p _site/dist/data _site/dist/layers _site/dist/previews _site/dist/seasons _site/dist/tiles
+
+          fetch_asset() {
+            local path="$1"
+            mkdir -p "_site/$(dirname "$path")"
+            curl --fail --location --silent --show-error \
+              --retry 5 --retry-delay 2 --retry-all-errors \
+              "$SOURCE_BASE/$path" -o "_site/$path"
+          }
+
+          for path in \
+            preview/index.html \
+            preview/app.js \
+            preview/styles.css \
+            preview/vendor/leaflet.css \
+            preview/vendor/leaflet.js \
+            preview/vendor/LEAFLET-LICENSE \
+            dist/data/map-data.json \
+            dist/tiles/manifest.json \
+            dist/layers/boundaries.svg \
+            dist/layers/hydrology.svg \
+            dist/layers/labels.svg \
+            dist/layers/map-master-8192x5461.svg \
+            dist/layers/nodes.svg \
+            dist/layers/regions.svg \
+            dist/layers/roads.svg \
+            dist/layers/routes.svg \
+            dist/layers/sea-routes.svg
+          do
+            fetch_asset "$path"
+          done
+
+          for season in spring summer autumn winter
+          do
+            fetch_asset "dist/previews/map-${season}-terrain-8192x5461-preview-1024.webp"
+            fetch_asset "dist/seasons/map-${season}-terrain-8192x5461.webp"
+          done
+
+          download_tile() {
+            local season="$1"
+            local z="$2"
+            local x="$3"
+            local y="$4"
+            fetch_asset "dist/tiles/$season/$z/$x/$y.webp"
+          }
+          export -f fetch_asset download_tile
+          export SOURCE_BASE
+
+          {
+            for season in spring summer autumn winter
+            do
+              for spec in "0 1 1" "1 2 2" "2 4 3" "3 8 6" "4 16 11"
+              do
+                read -r z x_count y_count <<< "$spec"
+                for ((x=0; x<x_count; x++))
+                do
+                  for ((y=0; y<y_count; y++))
+                  do
+                    printf '%s %s %s %s\n' "$season" "$z" "$x" "$y"
+                  done
+                done
+              done
+            done
+          } | xargs -n 4 -P 16 bash -c 'download_tile "$@"' _
+
+          touch _site/.nojekyll
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width,initial-scale=1">
+              <meta http-equiv="refresh" content="0;url=./preview/index.html">
+              <title>九域山河 · 世界地图</title>
+            </head>
+            <body>
+              <a href="./preview/index.html">打开九域山河世界地图</a>
+            </body>
+          </html>
+          HTML
+
+          test "$(find _site/dist/tiles -type f -name '*.webp' | wc -l)" -eq 964
+          jq empty _site/dist/data/map-data.json
+          ! grep -E '龙曦|无名沉渊|dragonCanon|east-sea-nameless-deep' _site/dist/data/map-data.json
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
