@@ -1,0 +1,19 @@
+# Generated role-card artifacts
+dist/
+build/
+release/
+*.png
+*.bak
+
+# Local and secret files
+*.secret.*
+.env
+.env.*
+!.env.example
+
+# Dependencies and editor state
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
