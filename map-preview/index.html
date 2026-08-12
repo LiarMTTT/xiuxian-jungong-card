@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>九域山河 · 8K 世界地图预览</title>
+    <link rel="stylesheet" href="./vendor/leaflet.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <button class="icon-button mobile-only" id="sidebarToggle" type="button" aria-label="展开图层面板">☰</button>
+          <div class="seal" aria-hidden="true">域</div>
+          <div>
+            <h1 id="mapTitle">九域山河</h1>
+            <p id="mapSubtitle">8K 分层世界地图 · 云端交互检视台</p>
+          </div>
+        </div>
+        <div class="topbar-status">
+          <span class="status-pill season-pill" id="seasonPill"><i></i><span>春 · 生发</span></span>
+          <span class="status-pill" id="assetStatus" data-state="loading"><i></i><span>正在探测地图资产</span></span>
+        </div>
+      </header>
+
+      <aside class="sidebar" id="sidebar" aria-label="地图图层与显示设置">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">MAP LAYERS</span>
+            <h2>山河图层</h2>
+          </div>
+          <button class="icon-button mobile-only" id="sidebarClose" type="button" aria-label="收起图层面板">×</button>
+        </div>
+
+        <section class="control-section">
+          <div class="section-title">
+            <span>地貌与季相</span>
+            <button class="text-button" id="resetLayers" type="button">恢复默认</button>
+          </div>
+          <label class="layer-row locked">
+            <span class="layer-icon terrain-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>季节地貌底图</b><small>随玩家世界时间变化</small></span>
+            <input type="checkbox" checked disabled />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon weather-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>季候表现</b><small>雪线、冰线、水文与雾气</small></span>
+            <input type="checkbox" data-layer="weather" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon water-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>主要水系</b><small>河流、湖泊与水运骨架</small></span>
+            <input type="checkbox" data-layer="waterways" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon boundary-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>区域疆界</b><small>五域、四海及公开边界</small></span>
+            <input type="checkbox" data-layer="boundaries" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+        </section>
+
+        <section class="control-section">
+          <div class="section-title"><span>交通与势力</span></div>
+          <label class="layer-row">
+            <span class="layer-icon route-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>陆路交通</b><small>官道、商路、山口与运河</small></span>
+            <input type="checkbox" data-layer="roads" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon sea-route-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>公开航线</b><small>港口与远洋旅行路线</small></span>
+            <input type="checkbox" data-layer="sea-routes" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon influence-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>势力影响</b><small>非绝对主权的控制范围</small></span>
+            <input type="checkbox" data-layer="influence" />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+        </section>
+
+        <section class="control-section">
+          <div class="section-title"><span>节点与情报</span></div>
+          <label class="layer-row">
+            <span class="layer-icon marker-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>地图节点</b><small>按当前 LOD 自动显隐</small></span>
+            <input type="checkbox" data-layer="markers" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon label-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>地名标注</b><small>区域、城池与地理名称</small></span>
+            <input type="checkbox" data-layer="labels" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="layer-row">
+            <span class="layer-icon danger-icon" aria-hidden="true"></span>
+            <span class="layer-copy"><b>已知险地</b><small>仅显示当前情报权限内容</small></span>
+            <input type="checkbox" data-layer="danger" checked />
+            <span class="switch" aria-hidden="true"></span>
+          </label>
+          <label class="select-row" for="accessLevel">
+            <span><b>情报视图</b><small>预览不同玩家权限</small></span>
+            <select id="accessLevel">
+              <option value="public">公开地理</option>
+              <option value="travel" selected>旅行地图</option>
+              <option value="faction">势力情报</option>
+              <option value="deep">深层情报</option>
+              <option value="author">作者母版</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="control-section compact-section">
+          <div class="section-title"><span>资源加载</span></div>
+          <label class="select-row" for="assetMode">
+            <span><b>渲染来源</b><small>瓦片失败时回退整图</small></span>
+            <select id="assetMode">
+              <option value="auto" selected>自动选择</option>
+              <option value="tiles">优先瓦片</option>
+              <option value="raster">8K 整图（桌面手动）</option>
+            </select>
+          </label>
+          <label class="file-button" for="dataFile">
+            <span>导入本地地图数据</span>
+            <small>用于 file:// 模式或临时验收 JSON</small>
+            <input id="dataFile" type="file" accept="application/json,.json" />
+          </label>
+          <p class="load-note" id="loadNote">将从 <code>../dist/data/map-data.json</code> 自动载入。</p>
+        </section>
+
+        <footer class="sidebar-footer">
+          <div><span>坐标基准</span><b id="mapDimensions">8192 × 5461</b></div>
+          <div><span>当前数据</span><b id="dataVersion">等待载入</b></div>
+        </footer>
+      </aside>
+
+      <main class="map-stage">
+        <div
+          class="map-viewport"
+          id="mapViewport"
+          tabindex="0"
+          role="application"
+          aria-label="可拖拽缩放的九域世界地图。滚轮缩放，拖拽平移，方向键移动。"
+        >
+          <div class="map-placeholder" id="mapPlaceholder">
+            <span class="placeholder-rings" aria-hidden="true"></span>
+            <div class="placeholder-content">
+              <span class="placeholder-seal">图</span>
+              <strong>正在展开九域山河</strong>
+              <small>先显示轻量季相预览，再按缩放层级补入 8K 地图细节</small>
+            </div>
+          </div>
+
+          <div class="leaflet-map season-spring" id="leafletMap" aria-hidden="true"></div>
+          <div class="season-atmosphere viewport-atmosphere" id="seasonAtmosphere" data-layer-target="weather" aria-hidden="true"></div>
+
+          <div class="map-vignette" aria-hidden="true"></div>
+          <div class="map-toolbar" aria-label="地图缩放控制">
+            <button type="button" id="zoomIn" title="放大">＋</button>
+            <div class="lod-meter" title="当前细节层级">
+              <span>LOD</span><b id="lodValue">0</b>
+            </div>
+            <button type="button" id="zoomOut" title="缩小">−</button>
+            <button type="button" id="fitMap" class="toolbar-divider" title="完整显示地图">⌗</button>
+          </div>
+
+          <div class="compass" aria-hidden="true"><span>北</span><i></i></div>
+
+          <div class="map-readout">
+            <span id="zoomReadout">100%</span>
+            <i></i>
+            <span id="coordinateReadout">X — · Y —</span>
+          </div>
+
+          <section class="feature-card" id="featureCard" aria-live="polite" hidden>
+            <button id="featureClose" type="button" aria-label="关闭地点详情">×</button>
+            <span class="feature-kicker" id="featureKicker">一级节点</span>
+            <h3 id="featureName">地点名称</h3>
+            <p id="featureDescription"></p>
+            <dl id="featureMeta"></dl>
+          </section>
+
+          <div class="interaction-hint" id="interactionHint">
+            <span class="mouse-icon" aria-hidden="true"></span>
+            拖拽移动 · 滚轮缩放 · 点击节点查看
+          </div>
+        </div>
+
+        <section class="time-dock" aria-label="玩家世界时间与季节预览">
+          <div class="time-summary">
+            <span class="eyebrow">PLAYER WORLD TIME</span>
+            <div><b id="worldDateText">元年 四月 初一</b><span id="seasonText">春季 · 万物生发</span></div>
+          </div>
+          <div class="date-controls">
+            <label><span>纪年</span><input id="worldYear" type="number" min="1" max="9999" value="1" /></label>
+            <label><span>月份</span><select id="worldMonth"></select></label>
+            <label><span>日期</span><input id="worldDay" type="number" min="1" max="30" value="1" /></label>
+          </div>
+          <div class="season-track" id="seasonTrack" aria-label="点击季节会把玩家时间推进到该季节的代表月份">
+            <button type="button" data-season="spring"><i></i><span>春</span><small>3—5月</small></button>
+            <button type="button" data-season="summer"><i></i><span>夏</span><small>6—8月</small></button>
+            <button type="button" data-season="autumn"><i></i><span>秋</span><small>9—11月</small></button>
+            <button type="button" data-season="winter"><i></i><span>冬</span><small>12—2月</small></button>
+          </div>
+          <button class="advance-button" id="advanceMonth" type="button"><span>推进一月</span><i>→</i></button>
+        </section>
+      </main>
+
+      <div class="sidebar-scrim" id="sidebarScrim"></div>
+      <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+    </div>
+    <script src="./vendor/leaflet.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
