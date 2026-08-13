@@ -24,6 +24,7 @@
     "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
     "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"
   ];
+  const LOD_RESOLUTIONS = ["512", "1K", "2K", "4K", "8K"];
 
   const ASSET_PATHS = {
     data: [
@@ -269,6 +270,8 @@
     const height = Number(dimensions.height || coordinateSystem.height || raw.height || DEFAULT_HEIGHT);
     const features = [];
     const geometry = [];
+    const factionNames = new Map((raw.factions || []).map((item) => [item.id, item.name]));
+    const regionNames = new Map((raw.regions || []).map((item) => [item.id, item.name]));
 
     const pushFeature = (item, defaults) => {
       if (!item) return;
@@ -279,10 +282,13 @@
       const normalizedCoords = coordinateSystem.normalized === true || (x >= 0 && x <= 1 && y >= 0 && y <= 1 && item.pixelCoordinates !== true);
       if (normalizedCoords) { x *= width; y *= height; }
       const lod = item.lod || {};
+      const factionIds = item.factionIds || item.factions || [];
+      const regionId = item.regionId || item.region || "";
+      const factionSubtitle = factionIds.map((id) => factionNames.get(id)).filter(Boolean).join(" · ");
       features.push({
         id: item.id || `${defaults.kind}-${features.length + 1}`,
         name: item.name || item.label || "未命名地点",
-        subtitle: item.subtitle || item.regionName || item.region || "",
+        subtitle: item.subtitle || item.regionName || factionSubtitle || regionNames.get(regionId) || "",
         x,
         y,
         kind: item.kind || item.type || defaults.kind,
@@ -292,8 +298,10 @@
         priority: Number(lod.priority ?? item.priority ?? defaults.priority),
         access: normalizeAccess(item.visibility || item.access || item.accessLevel || defaults.access),
         description: item.description || "",
-        factionIds: item.factionIds || item.factions || [],
-        regionId: item.regionId || item.region || "",
+        factionIds,
+        factionNames: factionIds.map((id) => factionNames.get(id) || id),
+        regionId,
+        regionName: regionNames.get(regionId) || regionId,
         tags: item.tags || [],
         seasonalTraits: item.seasonalTraits || item.seasonal || null,
         regionLabel: defaults.regionLabel || item.kind === "region"
@@ -360,7 +368,7 @@
     features.forEach((feature) => {
       const markerHtml = feature.regionLabel ? "" : `<button class="marker-button" type="button" data-glyph="${escapeHtml(feature.glyph)}" aria-label="查看${escapeHtml(feature.name)}"></button>`;
       const subtitleHtml = feature.subtitle ? `<small>${escapeHtml(feature.subtitle)}</small>` : "";
-      const html = `<div class="map-feature-anchor">${markerHtml}<span class="feature-label">${escapeHtml(feature.name)}${subtitleHtml}</span></div>`;
+      const html = `<div class="map-feature-anchor" data-kind="${escapeHtml(feature.kind)}">${markerHtml}<span class="feature-label">${escapeHtml(feature.name)}${subtitleHtml}</span></div>`;
       const icon = L.divIcon({ className: `map-feature-icon${feature.regionLabel ? " region-label" : ""}`, html, iconSize: [0, 0] });
       const layer = L.marker(pixelToLatLng(feature.x, feature.y), {
         icon,
@@ -488,6 +496,11 @@
           finish(false);
           return;
         }
+        if (state.currentAssetKind === "tiles" || state.currentAssetKind === "raster") {
+          if (state.map.hasLayer(incoming)) state.map.removeLayer(incoming);
+          finish(true);
+          return;
+        }
         if (state.currentPreview && state.map.hasLayer(state.currentPreview)) state.map.removeLayer(state.currentPreview);
         state.currentPreview = incoming;
         if (state.currentAssetKind !== "tiles" && state.currentAssetKind !== "raster") state.currentAssetKind = "preview";
@@ -538,6 +551,13 @@
         markMapVisible();
         setAssetStatus("ready", "LOD 瓦片已就绪");
         finish(true);
+      });
+      layer.once("load", () => {
+        if (token !== state.lastAssetToken || state.currentTiles !== layer) return;
+        if (state.currentPreview && state.map.hasLayer(state.currentPreview)) {
+          state.map.removeLayer(state.currentPreview);
+        }
+        state.currentPreview = null;
       });
       layer.on("tileerror", () => {
         if (token === state.lastAssetToken && state.currentAssetKind !== "tiles") {
@@ -633,7 +653,8 @@
     const lod = clamp(Math.floor(zoom + 4.25), 0, 4);
     state.currentLod = lod;
     els.lodValue.textContent = String(lod);
-    els.zoomReadout.textContent = `${Math.round(Math.pow(2, zoom) * 100)}%`;
+    els.lodValue.title = `LOD ${lod} · ${LOD_RESOLUTIONS[lod]} 源图层`;
+    els.zoomReadout.textContent = `${Math.round(Math.pow(2, zoom) * 100)}% · ${LOD_RESOLUTIONS[lod]}`;
     updateVisibility();
   }
 
@@ -676,8 +697,8 @@
     const seasonal = feature.seasonalTraits && (feature.seasonalTraits[state.currentSeason] || feature.seasonalTraits[SEASONS[state.currentSeason].label]);
     els.featureDescription.textContent = seasonal ? `${feature.description || ""}${feature.description ? "\n\n" : ""}${seasonal}` : (feature.description || "该地点暂未编写公开说明。");
     const meta = [];
-    if (feature.regionId) meta.push(["所属区域", feature.regionId]);
-    if (feature.factionIds && feature.factionIds.length) meta.push(["关联势力", feature.factionIds.join("、")]);
+    if (feature.regionId) meta.push(["所属区域", feature.regionName || feature.regionId]);
+    if (feature.factionIds && feature.factionIds.length) meta.push(["关联势力", (feature.factionNames || feature.factionIds).join("、")]);
     if (feature.tags && feature.tags.length) meta.push(["地点标签", feature.tags.join("、")]);
     meta.push(["可见权限", accessLabel(feature.access)]);
     meta.push(["像素坐标", `${Math.round(feature.x)}, ${Math.round(feature.y)}`]);
@@ -808,11 +829,29 @@
   }
 
   function glyphForKind(kind) {
-    return ({ faction: "宗", capital: "都", city: "城", port: "港", danger: "险", ruin: "遗", resource: "矿", node: "地" })[kind] || "地";
+    return ({
+      faction: "宗", capital: "都", "undersea-capital": "都", "mobile-capital": "都", "island-capital-port": "都",
+      city: "城", "trade-metropolis": "商", "craft-metropolis": "工", "caravan-city": "城",
+      "faction-seat": "宗", port: "港", "amphibious-port": "港", "transport-hub": "驿",
+      "mountain-pass": "关", "treaty-seat": "盟", "civilian-heartland": "田", "river-corridor": "河",
+      danger: "险", "danger-zone": "险", "resource-danger-zone": "泽", "anomaly-zone": "异", "mobile-anomaly": "异",
+      ruin: "遗", "ruin-zone": "遗", resource: "矿", "resource-zone": "矿", "industrial-resource-zone": "矿",
+      "sea-route-gate": "门", "sea-lane-hub": "航", "island-chain": "岛", "seasonal-route": "路", "navigation-outpost": "灯",
+      node: "地"
+    })[kind] || "地";
   }
 
   function kindLabel(kind) {
-    return ({ faction: "主要势力", capital: "核心城池", city: "主要城池", port: "重要港口", danger: "已知险地", ruin: "历史遗迹", resource: "资源区域", region: "九域地理" })[kind] || "一级地图节点";
+    return ({
+      faction: "主要势力", capital: "仙朝帝都", "undersea-capital": "海庭都城", "mobile-capital": "移动仙城", "island-capital-port": "群岛都港",
+      city: "主要城池", "trade-metropolis": "商贸巨城", "craft-metropolis": "工造巨城", "caravan-city": "商旅城池",
+      "faction-seat": "宗门驻地", port: "重要港口", "amphibious-port": "水陆港口", "transport-hub": "交通枢纽",
+      "mountain-pass": "山川关隘", "treaty-seat": "盟约驻地", "civilian-heartland": "凡俗腹地", "river-corridor": "大河走廊",
+      danger: "已知险地", "danger-zone": "已知险地", "resource-danger-zone": "资源险地", "anomaly-zone": "异常区域", "mobile-anomaly": "移动异境",
+      ruin: "历史遗迹", "ruin-zone": "历史遗迹", resource: "资源区域", "resource-zone": "资源区域", "industrial-resource-zone": "工矿区域",
+      "sea-route-gate": "航路门径", "sea-lane-hub": "航运枢纽", "island-chain": "海上群岛", "seasonal-route": "季节通路", "navigation-outpost": "导航哨站",
+      region: "九域地理"
+    })[kind] || "地图节点";
   }
 
   function accessLabel(access) {
