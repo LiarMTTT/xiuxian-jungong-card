@@ -85,7 +85,8 @@
     currentAssetKind: null,
     date: { year: 1, month: 4, day: 1 },
     lastAssetToken: 0,
-    mapReady: false
+    mapReady: false,
+    selectedFeatureId: null
   };
 
   document.addEventListener("DOMContentLoaded", init);
@@ -103,11 +104,8 @@
     }
 
     initLeaflet();
-    fitMap(false);
     loadSeasonAssets(state.currentSeason, false);
-    Promise.allSettled([loadMapData(), loadManifest()]).then(() => {
-      if (!state.data) fitMap(false);
-    });
+    Promise.allSettled([loadMapData(), loadManifest()]);
   }
 
   function cacheElements() {
@@ -161,30 +159,35 @@
   }
 
   function initLeaflet() {
-    const initialZoom = -2;
+    const initialZoom = window.innerWidth <= 820 ? -2.25 : -1.5;
     state.map = L.map(els.leafletMap, {
       crs: L.CRS.Simple,
       zoomControl: false,
       attributionControl: false,
       minZoom: -4,
-      maxZoom: 3,
+      maxZoom: 0,
       zoomSnap: 0.25,
       zoomDelta: 0.5,
-      wheelPxPerZoomLevel: 80,
+      wheelPxPerZoomLevel: 120,
+      wheelDebounceTime: 40,
+      zoomAnimation: true,
+      fadeAnimation: true,
+      markerZoomAnimation: true,
+      inertia: true,
+      inertiaDeceleration: 2600,
+      inertiaMaxSpeed: 1500,
       preferCanvas: true,
       keyboardPanDelta: 120,
-      maxBoundsViscosity: 0.82
+      maxBoundsViscosity: 0.62
     });
     createPanes();
     updateBounds();
-    state.map.setView(pixelToLatLng(state.width / 2, state.height / 2), initialZoom);
-    state.map.on("zoomend zoom", updateLod);
+    state.map.setView(pixelToLatLng(state.width * 0.52, state.height * 0.49), initialZoom);
+    state.map.on("zoomend", updateLod);
     state.map.on("mousemove", updateCoordinateReadout);
     state.map.on("mouseout", () => { els.coordinateReadout.textContent = "X — · Y —"; });
     state.map.on("movestart zoomstart", dismissInteractionHint);
-    state.map.on("click", (event) => {
-      if (event.originalEvent && event.originalEvent.target === els.leafletMap) closeFeatureCard();
-    });
+    state.map.on("click", closeFeatureCard);
     state.mapReady = true;
     updateLod();
   }
@@ -259,7 +262,7 @@
     els.mapSubtitle.textContent = normalized.subtitle || "8K 分层世界地图 · 云端交互检视台";
     els.dataVersion.textContent = normalized.version || `已载入 ${normalized.features.length} 个节点`;
     els.loadNote.innerHTML = `已载入 <code>${escapeHtml(sourceLabel)}</code>`;
-    if (state.mapReady) fitMap(false);
+    if (state.mapReady) state.map.panInsideBounds(state.bounds, { animate: false });
   }
 
   function normalizeMapData(raw) {
@@ -366,7 +369,7 @@
 
   function renderFeatures(features) {
     features.forEach((feature) => {
-      const markerHtml = feature.regionLabel ? "" : `<button class="marker-button" type="button" data-glyph="${escapeHtml(feature.glyph)}" aria-label="查看${escapeHtml(feature.name)}"></button>`;
+      const markerHtml = feature.regionLabel ? "" : `<button class="marker-button" type="button" aria-label="查看${escapeHtml(feature.name)}">${markerArtForKind(feature.kind)}</button>`;
       const subtitleHtml = feature.subtitle ? `<small>${escapeHtml(feature.subtitle)}</small>` : "";
       const html = `<div class="map-feature-anchor" data-kind="${escapeHtml(feature.kind)}">${markerHtml}<span class="feature-label">${escapeHtml(feature.name)}${subtitleHtml}</span></div>`;
       const icon = L.divIcon({ className: `map-feature-icon${feature.regionLabel ? " region-label" : ""}`, html, iconSize: [0, 0] });
@@ -379,7 +382,7 @@
       layer.addTo(state.map);
       layer.on("click", (event) => {
         if (event.originalEvent) L.DomEvent.stopPropagation(event.originalEvent);
-        showFeatureCard(feature);
+        selectFeature(feature);
       });
       const el = layer.getElement();
       if (el) {
@@ -526,15 +529,16 @@
     const layer = L.tileLayer(template, {
       pane: "tilePane",
       minZoom: -4,
-      maxZoom: 3,
+      maxZoom: 0,
       minNativeZoom: -4,
       maxNativeZoom: 0,
       zoomOffset: 4,
       tileSize: 512,
       noWrap: true,
       bounds: state.bounds,
-      keepBuffer: 1,
+      keepBuffer: 2,
       updateWhenIdle: true,
+      updateWhenZooming: false,
       errorTileUrl: ""
     });
 
@@ -637,7 +641,7 @@
   }
 
   function resetLayers() {
-    const defaults = { weather: true, waterways: true, boundaries: true, roads: true, "sea-routes": true, influence: false, markers: true, labels: true, danger: true };
+    const defaults = { weather: true, waterways: false, boundaries: false, roads: false, "sea-routes": false, influence: false, markers: true, labels: true, danger: false };
     document.querySelectorAll("input[data-layer]").forEach((input) => {
       input.checked = defaults[input.dataset.layer] !== false;
       toggleLayer(input.dataset.layer, input.checked);
@@ -670,8 +674,8 @@
       if (!el) return;
       const accessAllowed = (ACCESS_RANK[feature.access] ?? 1) <= rank;
       const lodAllowed = state.currentLod >= feature.minLod && state.currentLod <= feature.maxLod;
-      const priorityAllowed = state.currentLod >= 3 || feature.priority >= [90, 78, 55, 30, 0][state.currentLod];
-      const kindAllowed = feature.kind !== "danger" || dangerVisible;
+      const priorityAllowed = presentationAllowsFeature(feature);
+      const kindAllowed = !feature.kind.includes("danger") || dangerVisible;
       el.classList.toggle("access-hidden", !accessAllowed);
       el.classList.toggle("lod-hidden", !(lodAllowed && priorityAllowed && kindAllowed));
       const markerButton = el.querySelector(".marker-button");
@@ -706,7 +710,50 @@
     els.featureCard.hidden = false;
   }
 
-  function closeFeatureCard() { els.featureCard.hidden = true; }
+  function selectFeature(feature) {
+    state.selectedFeatureId = feature.id;
+    state.markers.forEach(({ layer, feature: markerFeature }) => {
+      const el = layer.getElement();
+      if (el) el.classList.toggle("selected", markerFeature.id === feature.id);
+    });
+    showFeatureCard(feature);
+  }
+
+  function closeFeatureCard() {
+    state.selectedFeatureId = null;
+    state.markers.forEach(({ layer }) => layer.getElement()?.classList.remove("selected"));
+    els.featureCard.hidden = true;
+  }
+
+  function presentationAllowsFeature(feature) {
+    if (feature.regionLabel) return state.currentLod <= 1;
+    if (state.currentLod < 2) return false;
+
+    const capitalKinds = new Set(["capital", "undersea-capital", "mobile-capital", "island-capital-port"]);
+    if (state.currentLod === 2) return capitalKinds.has(feature.kind);
+
+    const majorKinds = new Set(["faction-seat", "treaty-seat", "trade-metropolis", "craft-metropolis"]);
+    if (state.currentLod === 3) return capitalKinds.has(feature.kind) || (majorKinds.has(feature.kind) && feature.priority >= 90);
+
+    return feature.priority >= 74;
+  }
+
+  function markerArtForKind(kind) {
+    const isCapital = ["capital", "undersea-capital", "island-capital-port"].includes(kind);
+    if (kind === "mobile-capital") {
+      return '<svg class="marker-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M7 28h27l7-7-3 11-8 6H15L7 28Z"/><path d="M14 26V13l12 13M27 25V8l11 17"/><path d="M12 39c8 4 18 4 25 0"/></svg>';
+    }
+    if (kind === "faction-seat" || kind === "treaty-seat") {
+      return '<svg class="marker-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M6 38 18 13l6 10 5-8 13 23"/><path d="M14 31h20M18 26h12M21 21h6"/><path d="M18 38V28h12v10"/></svg>';
+    }
+    if (kind.includes("port") || kind.includes("sea") || kind.includes("island") || kind.includes("undersea")) {
+      return '<svg class="marker-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 27h28M14 27V17h20v10M19 17l5-7 5 7"/><path d="M7 34c5-4 10 4 16 0s11 4 18 0M9 40c5-4 10 4 16 0s10 4 14 0"/></svg>';
+    }
+    if (isCapital || kind.includes("city") || kind.includes("metropolis")) {
+      return '<svg class="marker-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M7 23h34L34 17H14l-7 6ZM12 30h24l-5-7H17l-5 7Z"/><path d="M16 30v10h16V30M21 40V30h6v10M18 17l6-8 6 8"/></svg>';
+    }
+    return '<svg class="marker-art" viewBox="0 0 48 48" aria-hidden="true"><path d="M10 25h28l-6-6H16l-6 6ZM15 25v14h18V25M20 39v-9h8v9"/><circle cx="24" cy="13" r="4"/></svg>';
+  }
 
   function readDateControls() {
     state.date.year = clamp(parseInt(els.worldYear.value, 10) || 1, 1, 9999);
